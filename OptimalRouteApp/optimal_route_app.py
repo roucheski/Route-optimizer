@@ -45,16 +45,17 @@ def generate_clustered_map(df_all, num_routes, max_capacity, _client):
     # Create base map
     m = folium.Map(location=start_coord, zoom_start=12)
 
+    # Plot each route
     for i in range(num_routes):
-        cluster = clustered_df[clustered_df['Cluster'] == i].reset_index(drop=True)
+        cluster = clustered_df[clustered_df['Cluster'] == i]
 
-        # Prepare coordinates for routing: start point + cluster points
+        # Prepare coordinates for routing: start point + points in cluster
         route_coords = [(start_coord[1], start_coord[0])] + [
             (row['Longitudes'], row['Latitudes']) for _, row in cluster.iterrows()
         ]
 
         try:
-            route = _client.directions(
+            route = client.directions(
                 coordinates=route_coords,
                 profile='driving-car',
                 optimize_waypoints=True,
@@ -62,37 +63,38 @@ def generate_clustered_map(df_all, num_routes, max_capacity, _client):
             )
             folium.GeoJson(route, name=f"Route {i+1}").add_to(m)
 
-            # Extract segment distances and compute cumulative distances
+            # Extract segment distances (meters) for cumulative distance calculation
             segments = route['features'][0]['properties']['segments']
-            cumulative_distances = [0]
+            cumulative_distances = [0]  # cumulative distance starts at 0 for the start point
             for seg in segments:
                 cumulative_distances.append(cumulative_distances[-1] + seg['distance'])
 
-            # Get optimized waypoint order - maps route index to input coords index
-            waypoint_order = route['features'][0]['properties']['way_points']
+            # Map coordinates to cumulative distances
+            coord_to_cumdist = {}
+            for idx, coord in enumerate(route_coords):
+                # coord is (lon, lat), key stored as (lat, lon)
+                coord_to_cumdist[(coord[1], coord[0])] = cumulative_distances[idx]
 
-            # Reorder cluster DataFrame according to ORS optimized order (skip start point index 0)
-            reordered_indices = waypoint_order[1:]  # drop start point index 0
-            reordered_cluster = cluster.iloc[[idx-1 for idx in reordered_indices]].reset_index(drop=True)
-
-            # Now iterate reordered_cluster in visiting order:
-            for drop_num, (idx, row) in enumerate(reordered_cluster.iterrows(), start=1):
-                cum_dist_km = cumulative_distances[drop_num] / 1000  # meters to km
+            # Add markers with cumulative distance popup
+            for _, row in cluster.iterrows():
+                lat, lon = row['Latitudes'], row['Longitudes']
+                cum_dist_m = coord_to_cumdist.get((lat, lon), None)
+                cum_dist_km = (cum_dist_m / 1000) if cum_dist_m is not None else 0
 
                 popup = f"""
                 <b>{row['Address']}</b><br>
                 👤 {row['Employee Number']}<br>
                 📏 {row['Distance before(km)']} km<br>
-                🚗 Drop #{drop_num} — {cum_dist_km:.2f} km cumulative distance
+                🚗 {cum_dist_km:.2f} km cumulative distance along route
                 """
                 folium.Marker(
-                    location=(row['Latitudes'], row['Longitudes']),
+                    location=(lat, lon),
                     tooltip=popup,
                     icon=folium.Icon(color='blue', icon='user')
                 ).add_to(m)
 
         except Exception as e:
-            # Fallback: show points without optimized order and cumulative distance
+            # In case routing fails, just add markers without route info
             for _, row in cluster.iterrows():
                 popup = f"{row['Address']}<br>{row['Employee Number']}<br>{row['Distance before(km)']}"
                 folium.Marker(
@@ -124,6 +126,7 @@ if uploaded_files and num_routes:
             break
 
     if not error_loading:
+        # Ensure proper numeric types
         df_all['Latitudes'] = pd.to_numeric(df_all['Latitudes'], errors='coerce')
         df_all['Longitudes'] = pd.to_numeric(df_all['Longitudes'], errors='coerce')
         df_all.dropna(subset=['Latitudes', 'Longitudes'], inplace=True)
@@ -140,10 +143,12 @@ if uploaded_files and num_routes:
 
             st.success(f"✅ Generated {num_routes} optimized route(s).")
 
+            # Save map HTML to a BytesIO stream
             map_html_io = BytesIO()
             m.save(map_html_io, close_file=False)
             map_html_io.seek(0)
 
+            # Layout: map on left, download button on right aligned top
             col1, col2 = st.columns([9, 1])
             with col1:
                 st_folium(m, width=900, height=600)
