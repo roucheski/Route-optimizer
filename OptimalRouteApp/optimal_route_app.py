@@ -23,7 +23,7 @@ body {
 # Upload section
 uploaded_files = st.file_uploader("📁 Upload up to 10 Excel files", type=["xlsx"], accept_multiple_files=True)
 num_routes = st.number_input("🔢 Number of Routes", min_value=1, max_value=10, step=1)
-max_capacity = 54  # Max people per route
+max_capacity = 65  # Max people per route
 
 # OpenRouteService API key
 ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjFhN2I5N2Q4YmU1MDRjOWZiNmNlNmEzZDA3MjUxMDgxIiwiaCI6Im11cm11cjY0In0="  # Replace with your real ORS key
@@ -162,3 +162,4 @@ if uploaded_files and num_routes:
                 )
 else:
     st.info("Please upload Excel file(s) and select number of routes to generate the map.")
+
